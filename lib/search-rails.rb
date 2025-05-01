@@ -3,6 +3,7 @@
 require "rails/all"
 require "query-ruby"
 require "zeitwerk"
+require "chronic"
 
 loader = Zeitwerk::Loader.for_gem(warn_on_extra_files: false)
 loader.ignore("#{__dir__}/search-rails.rb")

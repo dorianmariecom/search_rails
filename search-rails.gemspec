@@ -15,6 +15,7 @@ Gem::Specification.new do |s|
   s.add_dependency "rails"
   s.add_dependency "query-ruby"
   s.add_dependency "zeitwerk"
+  s.add_dependency "chronic"
 
   s.metadata["rubygems_mfa_required"] = "true"
 
