@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-require "rails/all"
+require "active_support/all"
+require "active_record"
 require "query-ruby"
 require "zeitwerk"
 require "chronic"

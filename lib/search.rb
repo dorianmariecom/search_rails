@@ -4,17 +4,19 @@ module Search
   extend ActiveSupport::Concern
 
   class_methods do
-    # self.fields = {
-    #   id: { node: -> { arel_table[:id] }, type: :integer },
-    #   name: { node: -> { arel_table[:name] }, type: :string },
-    #   input: { node: -> { arel_table[:input] }, type: :string },
-    #   updated_at: { node: -> { arel_table[:updated_at] }, type: :datetime },
-    #   created_at: { node: -> { arel_table[:created_at] }, type: :datetime },
-    # }
-    cattr_accessor :fields, default: {}
-
     def _search_cast(node:, type: "text")
       Arel::Nodes::NamedFunction.new('cast', [node.as(type)])
+    end
+
+    def _search_cast_boolean(value)
+      if value.is_a?(Range)
+        first = _search_cast_boolean(value.first)
+        last = _search_cast_boolean(value.last)
+
+        value.exclude_end? ? first...last : first..last
+      else
+        ActiveModel::Type::Boolean.new.cast(value)
+      end
     end
 
     def _search_cast_integer(value)
@@ -54,6 +56,15 @@ module Search
   end
 
   included do
+    # self.fields = {
+    #   id: { node: -> { arel_table[:id] }, type: :integer },
+    #   name: { node: -> { arel_table[:name] }, type: :string },
+    #   input: { node: -> { arel_table[:input] }, type: :string },
+    #   updated_at: { node: -> { arel_table[:updated_at] }, type: :datetime },
+    #   created_at: { node: -> { arel_table[:created_at] }, type: :datetime },
+    # }
+    class_attribute :fields, default: {}
+
     # q:
     #   ""
     #   "dorian"
@@ -273,7 +284,7 @@ module Search
       when :datetime
         _search_datetime_lt(node: node, value: value)
       when :boolean
-        _search_boolean_lt(node: node, value: value)
+        none
       else
         raise ArgumentError
       end
@@ -290,7 +301,7 @@ module Search
       when :datetime
         _search_datetime_lteq(node: node, value: value)
       when :boolean
-        _search_boolean_lteq(node: node, value: value)
+        _search_boolean_eq(node: node, value: value)
       else
         raise ArgumentError
       end
@@ -307,7 +318,7 @@ module Search
       when :datetime
         _search_datetime_gt(node: node, value: value)
       when :boolean
-        _search_boolean_gt(node: node, value: value)
+        none
       else
         raise ArgumentError
       end
@@ -324,7 +335,7 @@ module Search
       when :datetime
         _search_datetime_gteq(node: node, value: value)
       when :boolean
-        _search_boolean_gteq(node: node, value: value)
+        _search_boolean_eq(node: node, value: value)
       else
         raise ArgumentError
       end
@@ -369,6 +380,21 @@ module Search
           where(node.gteq(value.first).and(node.lt(value.last)))
         else
           where(node.gteq(value.first).and(node.lteq(value.last)))
+        end
+      else
+        where(node.eq(value))
+      end
+    }
+
+    scope :_search_boolean_eq, -> (node:, value:) {
+      node = _search_cast(node: node, type: :boolean)
+      value = _search_cast_boolean(value)
+
+      if value.is_a?(Range)
+        if value.exclude_end?
+          where(node.eq(value.first).and(node.not_eq(value.last)))
+        else
+          where(node.eq(value.first)).or(where(node.eq(value.last)))
         end
       else
         where(node.eq(value))
