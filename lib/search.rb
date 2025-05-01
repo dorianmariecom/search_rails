@@ -4,8 +4,18 @@ module Search
   extend ActiveSupport::Concern
 
   class_methods do
+    def _search_extract_node(node, keys = [])
+      keys << node[:key]
+
+      if node[:value].is_a?(Hash)
+        _search_extract_node(node[:value], keys)
+      else
+        { **node, key: keys.join(":") }
+      end
+    end
+
     def _search_cast(node:, type: "text")
-      Arel::Nodes::NamedFunction.new('cast', [node.as(type)])
+      Arel::Nodes::NamedFunction.new("cast", [node.as(type)])
     end
 
     def _search_cast_boolean(value)
@@ -79,467 +89,551 @@ module Search
     #   }
     # fields:
     #   [:id, :name, :input]
-    scope :search, -> (q: "", params: {}, fields: self.fields&.keys) {
-      raise ArgumentError unless self.fields.is_an?(Hash)
-      raise ArgumentError unless fields.is_an?(Array)
-      raise ArgumentError unless params.is_an?(Hash)
+    scope :search,
+          ->(q: "", params: {}, fields: self.fields&.keys) do
+            raise ArgumentError unless self.fields.is_an?(Hash)
+            raise ArgumentError unless fields.is_an?(Array)
+            raise ArgumentError unless params.is_an?(Hash)
 
-      fields = fields.map(&:to_s)
-      q = q.to_s
+            fields = fields.map(&:to_s)
+            q = q.to_s
 
-      _search_parsed(parsed: ::Query.evaluate(q), scope: all, fields: fields).distinct
-    }
-
-    scope :_search_parsed, ->(parsed:, scope: all, fields: self.fields&.keys) {
-      if parsed.is_a?(String)
-        scope._search_fields(q: parsed, fields: fields)
-      elsif parsed.is_a?(Hash)
-        if parsed.key?(:left)
-          if parsed[:operator] == "or"
-            scope.where(
-              id: _search_parsed(parsed: parsed[:left], scope: scope, fields: fields)
-            ).or(
-              scope.where(
-                id: _search_parsed(parsed: parsed[:right], scope: scope, fields: fields)
-              )
-            )
-          elsif parsed[:operator] == "and"
-            scope.where(
-              id: _search_parsed(parsed: parsed[:left], scope: scope, fields: fields)
-            ).where(
-              id: _search_parsed(parsed: parsed[:right], scope: scope, fields: fields)
+            where(
+              id:
+                _search_joins(
+                  scope:
+                    _search_parsed(
+                      parsed: ::Query.evaluate(q),
+                      scope: all,
+                      fields: fields
+                    ),
+                  fields: fields
+                )
             )
           end
-        elsif parsed.key?(:right)
-          scope.where.not(
-            id: _search_parsed(parsed: parsed[:right], scope: scope, fields: fields)
-          )
-        elsif parsed.key?(:key)
-          key = parsed[:key].to_s.presence_in(fields)
-          operator = parsed[:operator]
-          value = parsed[:value]
 
-          scope._search_field(key: key, operator: operator, value: value)
-        else
-          raise ArgumentError
-        end
-      else
-        raise ArgumentError
-      end
-    }
+    scope :_search_joins,
+          ->(scope:, fields:) do
+            fields = fields.map(&:to_s)
+
+            relations =
+              fields.map { |field| self.fields.fetch(field.to_sym)[:relation] }.compact
+
+            relations.reduce(scope) do |scope_with_relations, relation|
+              relation.call(scope_with_relations)
+            end
+          end
+
+    scope :_search_parsed,
+          ->(parsed:, scope:, fields:) do
+            if parsed.is_a?(String)
+              scope._search_fields(q: parsed, fields: fields)
+            elsif parsed.is_a?(Hash)
+              if parsed.key?(:left)
+                if parsed[:operator] == "or"
+                  scope.where(
+                    id:
+                      _search_parsed(
+                        parsed: parsed[:left],
+                        scope: scope,
+                        fields: fields
+                      )
+                  ).or(
+                    scope.where(
+                      id:
+                        _search_parsed(
+                          parsed: parsed[:right],
+                          scope: scope,
+                          fields: fields
+                        )
+                    )
+                  )
+                elsif parsed[:operator] == "and"
+                  scope.where(
+                    id:
+                      _search_parsed(
+                        parsed: parsed[:left],
+                        scope: scope,
+                        fields: fields
+                      )
+                  ).where(
+                    id:
+                      _search_parsed(
+                        parsed: parsed[:right],
+                        scope: scope,
+                        fields: fields
+                      )
+                  )
+                end
+              elsif parsed.key?(:right)
+                scope.where.not(
+                  id:
+                    _search_parsed(
+                      parsed: parsed[:right],
+                      scope: scope,
+                      fields: fields
+                    )
+                )
+              elsif parsed.key?(:key)
+                parsed = _search_extract_node(parsed)
+                key = parsed[:key].to_s.presence_in(fields)
+                operator = parsed[:operator]
+                value = parsed[:value]
+
+                scope._search_field(key: key, operator: operator, value: value)
+              else
+                raise ArgumentError
+              end
+            else
+              raise ArgumentError
+            end
+          end
 
     # q:
     #   "dorian"
     #   "1"
     # fields: [:id, :given_name, :family_name]
-    scope :_search_fields, -> (q: "", fields: self.fields&.keys) {
-      raise ArgumentError unless self.fields.is_an?(Hash)
-      raise ArgumentError unless fields.is_an?(Array)
+    scope :_search_fields,
+          ->(q: "", fields: self.fields&.keys) do
+            raise ArgumentError unless self.fields.is_an?(Hash)
+            raise ArgumentError unless fields.is_an?(Array)
 
-      fields = fields.map(&:to_s)
-      q = q.to_s
+            fields = fields.map(&:to_s)
+            q = q.to_s
 
-      where(
-        fields.map do |field|
-          field = self.fields.fetch(field.to_sym)
-          node = field[:node].call
-          casted_field = _search_cast(node: node, type: :text)
-          casted_field.matches("%#{q}%", nil, false)
-        end.reduce(&:or)
-      )
-    }
+            where(
+              fields
+                .map do |field|
+                  field = self.fields.fetch(field.to_sym)
+                  node = field[:node].call
+                  casted_field = _search_cast(node: node, type: :text)
+                  casted_field.matches("%#{q}%", nil, false)
+                end
+                .reduce(&:or)
+            )
+          end
 
     # key: input, name, id, created_at, updated_at, verified, admin, ...
     # operator: :, =, >, ~, <, >=, ...
     # value: "pomodoro", 123, true, false
-    scope :_search_field, -> (key:, operator: ":", value:, fields: self.fields&.keys) {
-      raise ArgumentError unless self.fields.is_an?(Hash)
-      raise ArgumentError unless fields.is_an?(Array)
+    scope :_search_field,
+          ->(key:, operator: ":", value:, fields: self.fields&.keys) do
+            raise ArgumentError unless self.fields.is_an?(Hash)
+            raise ArgumentError unless fields.is_an?(Array)
 
-      fields = fields.map(&:to_s)
-      key = key.to_s.presence_in(fields)
+            fields = fields.map(&:to_s)
+            key = key.to_s.presence_in(fields)
 
-      raise ArgumentError if key.blank?
-      raise ArgumentError if operator.blank?
+            raise ArgumentError if key.blank?
+            raise ArgumentError if operator.blank?
 
-      field = self.fields.fetch(key.to_sym)
+            field = self.fields.fetch(key.to_sym)
 
-      case operator
-      when ":"
-        _search_colon(field: field, value: value)
-      when "^"
-        _search_starts(field: field, value: value)
-      when "$"
-        _search_ends(field: field, value: value)
-      when ">="
-        _search_greater_or_equal(field: field, value: value)
-      when "<="
-        _search_lesser_or_equal(field: field, value: value)
-      when ">"
-        _search_greater(field: field, value: value)
-      when "<"
-        _search_lesser(field: field, value: value)
-      when "="
-        _search_equal(field: field, value: value)
-      when "!:"
-        where.not(id: _search_colon(field: field, value: value))
-      when "!!"
-        where.not(id: _search_colon(field: field, value: value))
-      when "!^"
-        where.not(id: _search_starts(field: field, value: value))
-      when "!$"
-        where.not(id: _search_ends(field: field, value: value))
-      when "!>="
-        where.not(id: _search_greater_or_equal(field: field, value: value))
-      when "!<="
-        where.not(id: _search_lesser_or_equal(field: field, value: value))
-      when "!>"
-        where.not(id: _search_greater(field: field, value: value))
-      when "!<"
-        where.not(id: _search_lesser(field: field, value: value))
-      when "!="
-        where.not(id: _search_equal(field: field, value: value))
-      else
-        raise ArgumentError
-      end
-    }
+            case operator
+            when ":"
+              _search_colon(field: field, value: value)
+            when "^"
+              _search_starts(field: field, value: value)
+            when "$"
+              _search_ends(field: field, value: value)
+            when ">="
+              _search_greater_or_equal(field: field, value: value)
+            when "<="
+              _search_lesser_or_equal(field: field, value: value)
+            when ">"
+              _search_greater(field: field, value: value)
+            when "<"
+              _search_lesser(field: field, value: value)
+            when "="
+              _search_equal(field: field, value: value)
+            when "!:"
+              where.not(id: _search_colon(field: field, value: value))
+            when "!!"
+              where.not(id: _search_colon(field: field, value: value))
+            when "!^"
+              where.not(id: _search_starts(field: field, value: value))
+            when "!$"
+              where.not(id: _search_ends(field: field, value: value))
+            when "!>="
+              where.not(
+                id: _search_greater_or_equal(field: field, value: value)
+              )
+            when "!<="
+              where.not(id: _search_lesser_or_equal(field: field, value: value))
+            when "!>"
+              where.not(id: _search_greater(field: field, value: value))
+            when "!<"
+              where.not(id: _search_lesser(field: field, value: value))
+            when "!="
+              where.not(id: _search_equal(field: field, value: value))
+            else
+              raise ArgumentError
+            end
+          end
 
     # id:1, name:dorian, verified:true, created_at:today
-    scope :_search_colon, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_colon,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_eq(node: node, value: value)
-      when :string
-        _search_string_matches(node: node, value: value)
-      when :datetime
-        _search_datetime_eq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_eq(node: node, value: value)
+            when :string
+              _search_string_matches(node: node, value: value)
+            when :datetime
+              _search_datetime_eq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_ends, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_ends,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_eq(node: node, value: value)
-      when :string
-        _search_string_ends(node: node, value: value)
-      when :datetime
-        _search_datetime_eq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_eq(node: node, value: value)
+            when :string
+              _search_string_ends(node: node, value: value)
+            when :datetime
+              _search_datetime_eq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_starts, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_starts,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_eq(node: node, value: value)
-      when :string
-        _search_string_starts(node: node, value: value)
-      when :datetime
-        _search_datetime_eq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_eq(node: node, value: value)
+            when :string
+              _search_string_starts(node: node, value: value)
+            when :datetime
+              _search_datetime_eq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_equal, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_equal,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_eq(node: node, value: value)
-      when :string
-        _search_string_eq(node: node, value: value)
-      when :datetime
-        _search_datetime_eq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_eq(node: node, value: value)
+            when :string
+              _search_string_eq(node: node, value: value)
+            when :datetime
+              _search_datetime_eq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_lesser, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_lesser,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_lt(node: node, value: value)
-      when :string
-        _search_string_lt(node: node, value: value)
-      when :datetime
-        _search_datetime_lt(node: node, value: value)
-      when :boolean
-        none
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_lt(node: node, value: value)
+            when :string
+              _search_string_lt(node: node, value: value)
+            when :datetime
+              _search_datetime_lt(node: node, value: value)
+            when :boolean
+              none
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_lesser_or_equal, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_lesser_or_equal,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_lteq(node: node, value: value)
-      when :string
-        _search_string_lteq(node: node, value: value)
-      when :datetime
-        _search_datetime_lteq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_lteq(node: node, value: value)
+            when :string
+              _search_string_lteq(node: node, value: value)
+            when :datetime
+              _search_datetime_lteq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_greater, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_greater,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_gt(node: node, value: value)
-      when :string
-        _search_string_gt(node: node, value: value)
-      when :datetime
-        _search_datetime_gt(node: node, value: value)
-      when :boolean
-        none
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_gt(node: node, value: value)
+            when :string
+              _search_string_gt(node: node, value: value)
+            when :datetime
+              _search_datetime_gt(node: node, value: value)
+            when :boolean
+              none
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_greater_or_equal, -> (field:, value:) {
-      node = field[:node].call
+    scope :_search_greater_or_equal,
+          ->(field:, value:) do
+            node = field[:node].call
 
-      case field[:type]
-      when :integer
-        _search_integer_gteq(node: node, value: value)
-      when :string
-        _search_string_gteq(node: node, value: value)
-      when :datetime
-        _search_datetime_gteq(node: node, value: value)
-      when :boolean
-        _search_boolean_eq(node: node, value: value)
-      else
-        raise ArgumentError
-      end
-    }
+            case field[:type]
+            when :integer
+              _search_integer_gteq(node: node, value: value)
+            when :string
+              _search_string_gteq(node: node, value: value)
+            when :datetime
+              _search_datetime_gteq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
 
-    scope :_search_integer_eq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :bigint)
-      value = _search_cast_integer(value)
+    scope :_search_integer_eq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :bigint)
+            value = _search_cast_integer(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.eq(value))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.eq(value))
+            end
+          end
 
-    scope :_search_datetime_eq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :timestamp)
-      value = _search_cast_datetime(value)
+    scope :_search_datetime_eq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :timestamp)
+            value = _search_cast_datetime(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.eq(value))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.eq(value))
+            end
+          end
 
-    scope :_search_string_eq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
+    scope :_search_string_eq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.eq(value))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.eq(value))
+            end
+          end
 
-    scope :_search_boolean_eq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :boolean)
-      value = _search_cast_boolean(value)
+    scope :_search_boolean_eq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :boolean)
+            value = _search_cast_boolean(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.eq(value.first).and(node.not_eq(value.last)))
-        else
-          where(node.eq(value.first)).or(where(node.eq(value.last)))
-        end
-      else
-        where(node.eq(value))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.eq(value.first).and(node.not_eq(value.last)))
+              else
+                where(node.eq(value.first)).or(where(node.eq(value.last)))
+              end
+            else
+              where(node.eq(value))
+            end
+          end
 
-    scope :_search_integer_lt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :bigint)
-      value = _search_cast_integer(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_integer_lt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :bigint)
+            value = _search_cast_integer(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lt(value))
-    }
+            where(node.lt(value))
+          end
 
-    scope :_search_datetime_lt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :timestamp)
-      value = _search_cast_datetime(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_datetime_lt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :timestamp)
+            value = _search_cast_datetime(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lt(value))
-    }
+            where(node.lt(value))
+          end
 
-    scope :_search_string_lt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_string_lt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lt(value))
-    }
+            where(node.lt(value))
+          end
 
-    scope :_search_integer_lteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :bigint)
-      value = _search_cast_integer(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_integer_lteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :bigint)
+            value = _search_cast_integer(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lteq(value))
-    }
+            where(node.lteq(value))
+          end
 
-    scope :_search_datetime_lteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :timestamp)
-      value = _search_cast_datetime(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_datetime_lteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :timestamp)
+            value = _search_cast_datetime(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lteq(value))
-    }
+            where(node.lteq(value))
+          end
 
-    scope :_search_string_lteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
-      value = value.first if value.is_a?(Range)
+    scope :_search_string_lteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
+            value = value.first if value.is_a?(Range)
 
-      where(node.lteq(value))
-    }
+            where(node.lteq(value))
+          end
 
-    scope :_search_integer_gt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :bigint)
-      value = _search_cast_integer(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_integer_gt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :bigint)
+            value = _search_cast_integer(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gt(value))
-    }
+            where(node.gt(value))
+          end
 
-    scope :_search_datetime_gt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :timestamp)
-      value = _search_cast_datetime(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_datetime_gt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :timestamp)
+            value = _search_cast_datetime(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gt(value))
-    }
+            where(node.gt(value))
+          end
 
-    scope :_search_string_gt, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_string_gt,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gt(value))
-    }
+            where(node.gt(value))
+          end
 
-    scope :_search_integer_gteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :bigint)
-      value = _search_cast_integer(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_integer_gteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :bigint)
+            value = _search_cast_integer(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gteq(value))
-    }
+            where(node.gteq(value))
+          end
 
-    scope :_search_datetime_gteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :timestamp)
-      value = _search_cast_datetime(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_datetime_gteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :timestamp)
+            value = _search_cast_datetime(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gteq(value))
-    }
+            where(node.gteq(value))
+          end
 
-    scope :_search_string_gteq, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
-      value = value.last if value.is_a?(Range)
+    scope :_search_string_gteq,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
+            value = value.last if value.is_a?(Range)
 
-      where(node.gteq(value))
-    }
+            where(node.gteq(value))
+          end
 
-    scope :_search_string_matches, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
+    scope :_search_string_matches,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.matches("%#{value}%", nil, false))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.matches("%#{value}%", nil, false))
+            end
+          end
 
-    scope :_search_string_ends, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
+    scope :_search_string_ends,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.matches("%#{value}", nil, false))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.matches("%#{value}", nil, false))
+            end
+          end
 
-    scope :_search_string_starts, -> (node:, value:) {
-      node = _search_cast(node: node, type: :text)
-      value = _search_cast_string(value)
+    scope :_search_string_starts,
+          ->(node:, value:) do
+            node = _search_cast(node: node, type: :text)
+            value = _search_cast_string(value)
 
-      if value.is_a?(Range)
-        if value.exclude_end?
-          where(node.gteq(value.first).and(node.lt(value.last)))
-        else
-          where(node.gteq(value.first).and(node.lteq(value.last)))
-        end
-      else
-        where(node.matches("#{value}%", nil, false))
-      end
-    }
+            if value.is_a?(Range)
+              if value.exclude_end?
+                where(node.gteq(value.first).and(node.lt(value.last)))
+              else
+                where(node.gteq(value.first).and(node.lteq(value.last)))
+              end
+            else
+              where(node.matches("#{value}%", nil, false))
+            end
+          end
   end
 end
