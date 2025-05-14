@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    search-rails (2.0.0)
+    search_rails (2.0.1)
       chronic
       query-ruby
       rails
@@ -387,7 +387,7 @@ DEPENDENCIES
   rubocop-rspec
   rubocop-rspec_rails
   ruby-prof
-  search-rails!
+  search_rails!
   sinatra
   webmock
 
