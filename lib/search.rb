@@ -4,6 +4,19 @@ module Search
   extend ActiveSupport::Concern
 
   class_methods do
+    # def self.search_fields
+    #   {
+    #     id: { node: -> { arel_table[:id] }, type: :integer },
+    #     name: { node: -> { arel_table[:name] }, type: :string },
+    #     input: { node: -> { arel_table[:input] }, type: :string },
+    #     updated_at: { node: -> { arel_table[:updated_at] }, type: :datetime },
+    #     created_at: { node: -> { arel_table[:created_at] }, type: :datetime },
+    #   }
+    # end
+    def search_fields
+      {}
+    end
+
     def _search_extract_node(node, keys = [])
       keys << node[:key]
 
@@ -66,15 +79,6 @@ module Search
   end
 
   included do
-    # self.fields = {
-    #   id: { node: -> { arel_table[:id] }, type: :integer },
-    #   name: { node: -> { arel_table[:name] }, type: :string },
-    #   input: { node: -> { arel_table[:input] }, type: :string },
-    #   updated_at: { node: -> { arel_table[:updated_at] }, type: :datetime },
-    #   created_at: { node: -> { arel_table[:created_at] }, type: :datetime },
-    # }
-    class_attribute :fields, default: {}
-
     # q:
     #   ""
     #   "dorian"
@@ -90,10 +94,9 @@ module Search
     # fields:
     #   [:id, :name, :input]
     scope :search,
-          ->(q: "", params: {}, fields: self.fields&.keys) do
-            raise ArgumentError unless self.fields.is_an?(Hash)
+          ->(q: "", fields: self.search_fields&.keys) do
+            raise ArgumentError unless self.search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
-            raise ArgumentError unless params.is_an?(Hash)
 
             fields = fields.map(&:to_s)
             q = q.to_s
@@ -117,7 +120,7 @@ module Search
             fields = fields.map(&:to_s)
 
             relations =
-              fields.map { |field| self.fields.fetch(field.to_sym)[:relation] }.compact
+              fields.map { |field| self.search_fields.fetch(field.to_sym)[:relation] }.compact
 
             relations.reduce(scope) do |scope_with_relations, relation|
               relation.call(scope_with_relations)
@@ -180,7 +183,11 @@ module Search
                 operator = parsed[:operator]
                 value = parsed[:value]
 
-                scope._search_field(key: key, operator: operator, value: value)
+                if key.blank?
+                  scope.none
+                else
+                  scope._search_field(key: key, operator: operator, value: value)
+                end
               else
                 raise ArgumentError
               end
@@ -194,8 +201,8 @@ module Search
     #   "1"
     # fields: [:id, :given_name, :family_name]
     scope :_search_fields,
-          ->(q: "", fields: self.fields&.keys) do
-            raise ArgumentError unless self.fields.is_an?(Hash)
+          ->(q: "", fields: search_fields&.keys) do
+            raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
 
             fields = fields.map(&:to_s)
@@ -204,21 +211,22 @@ module Search
             where(
               fields
                 .map do |field|
-                  field = self.fields.fetch(field.to_sym)
+                  field = self.search_fields.fetch(field.to_sym)
                   node = field[:node].call
                   casted_field = _search_cast(node: node, type: :text)
                   casted_field.matches("%#{q}%", nil, false)
                 end
                 .reduce(&:or)
             )
+
           end
 
     # key: input, name, id, created_at, updated_at, verified, admin, ...
     # operator: :, =, >, ~, <, >=, ...
     # value: "pomodoro", 123, true, false
     scope :_search_field,
-          ->(key:, operator: ":", value:, fields: self.fields&.keys) do
-            raise ArgumentError unless self.fields.is_an?(Hash)
+          ->(key:, operator: ":", value:, fields: search_fields&.keys) do
+            raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
 
             fields = fields.map(&:to_s)
@@ -227,7 +235,7 @@ module Search
             raise ArgumentError if key.blank?
             raise ArgumentError if operator.blank?
 
-            field = self.fields.fetch(key.to_sym)
+            field = self.search_fields.fetch(key.to_sym)
 
             case operator
             when ":"
@@ -244,6 +252,8 @@ module Search
               _search_greater(field: field, value: value)
             when "<"
               _search_lesser(field: field, value: value)
+            when "~"
+              _search_matches(field: field, value: value)
             when "="
               _search_equal(field: field, value: value)
             when "!:"
@@ -273,6 +283,24 @@ module Search
 
     # id:1, name:dorian, verified:true, created_at:today
     scope :_search_colon,
+          ->(field:, value:) do
+            node = field[:node].call
+
+            case field[:type]
+            when :integer
+              _search_integer_eq(node: node, value: value)
+            when :string
+              _search_string_matches(node: node, value: value)
+            when :datetime
+              _search_datetime_eq(node: node, value: value)
+            when :boolean
+              _search_boolean_eq(node: node, value: value)
+            else
+              raise ArgumentError
+            end
+          end
+
+    scope :_search_matches,
           ->(field:, value:) do
             node = field[:node].call
 
