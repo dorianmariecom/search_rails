@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 Gem::Specification.new do |s|
-  s.name = "search-rails"
+  s.name = "search_rails"
   s.version = File.read("VERSION").strip
   s.summary = "a powerful search for rails"
   s.description = s.summary
@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.email = "dorian@dorianmarie.com"
   s.files = `git ls-files`.lines.map(&:strip)
   s.require_paths = ["lib"]
-  s.homepage = "https://github.com/dorianmariecom/search-rails"
+  s.homepage = "https://github.com/dorianmariecom/search_rails"
   s.license = "MIT"
 
   s.add_dependency "rails"
