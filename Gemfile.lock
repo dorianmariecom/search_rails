@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    search_rails (2.0.1)
+    search_rails (2.0.2)
       chronic
       query-ruby
       rails
