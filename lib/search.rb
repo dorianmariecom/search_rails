@@ -94,8 +94,8 @@ module Search
     # fields:
     #   [:id, :name, :input]
     scope :search,
-          ->(q: "", fields: self.search_fields&.keys) do
-            raise ArgumentError unless self.search_fields.is_an?(Hash)
+          lambda { |q: "", fields: search_fields&.keys|
+            raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
 
             fields = fields.map(&:to_s)
@@ -113,22 +113,24 @@ module Search
                   fields: fields
                 )
             )
-          end
+          }
 
     scope :_search_joins,
-          ->(scope:, fields:) do
+          lambda { |scope:, fields:|
             fields = fields.map(&:to_s)
 
             relations =
-              fields.map { |field| self.search_fields.fetch(field.to_sym)[:relation] }.compact
+              fields.filter_map do |field|
+                search_fields.fetch(field.to_sym)[:relation]
+              end
 
             relations.reduce(scope) do |scope_with_relations, relation|
               relation.call(scope_with_relations)
             end
-          end
+          }
 
     scope :_search_parsed,
-          ->(parsed:, scope:, fields:) do
+          lambda { |parsed:, scope:, fields:|
             if parsed.is_a?(String)
               scope._search_fields(q: parsed, fields: fields)
             elsif parsed.is_a?(Hash)
@@ -186,7 +188,11 @@ module Search
                 if key.blank?
                   scope.none
                 else
-                  scope._search_field(key: key, operator: operator, value: value)
+                  scope._search_field(
+                    key: key,
+                    operator: operator,
+                    value: value
+                  )
                 end
               else
                 raise ArgumentError
@@ -194,14 +200,14 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     # q:
     #   "dorian"
     #   "1"
     # fields: [:id, :given_name, :family_name]
     scope :_search_fields,
-          ->(q: "", fields: search_fields&.keys) do
+          lambda { |q: "", fields: search_fields&.keys|
             raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
 
@@ -211,21 +217,20 @@ module Search
             where(
               fields
                 .map do |field|
-                  field = self.search_fields.fetch(field.to_sym)
+                  field = search_fields.fetch(field.to_sym)
                   node = field[:node].call
                   casted_field = _search_cast(node: node, type: :text)
                   casted_field.matches("%#{q}%", nil, false)
                 end
                 .reduce(&:or)
             )
-
-          end
+          }
 
     # key: input, name, id, created_at, updated_at, verified, admin, ...
     # operator: :, =, >, ~, <, >=, ...
     # value: "pomodoro", 123, true, false
     scope :_search_field,
-          ->(key:, operator: ":", value:, fields: search_fields&.keys) do
+          lambda { |key:, value:, operator: ":", fields: search_fields&.keys|
             raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
 
@@ -235,7 +240,7 @@ module Search
             raise ArgumentError if key.blank?
             raise ArgumentError if operator.blank?
 
-            field = self.search_fields.fetch(key.to_sym)
+            field = search_fields.fetch(key.to_sym)
 
             case operator
             when ":"
@@ -279,11 +284,11 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     # id:1, name:dorian, verified:true, created_at:today
     scope :_search_colon,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -298,10 +303,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_matches,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -316,10 +321,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_ends,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -334,10 +339,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_starts,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -352,10 +357,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_equal,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -370,10 +375,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_lesser,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -388,10 +393,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_lesser_or_equal,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -406,10 +411,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_greater,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -424,10 +429,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_greater_or_equal,
-          ->(field:, value:) do
+          lambda { |field:, value:|
             node = field[:node].call
 
             case field[:type]
@@ -442,10 +447,10 @@ module Search
             else
               raise ArgumentError
             end
-          end
+          }
 
     scope :_search_integer_eq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :bigint)
             value = _search_cast_integer(value)
 
@@ -458,10 +463,10 @@ module Search
             else
               where(node.eq(value))
             end
-          end
+          }
 
     scope :_search_datetime_eq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :timestamp)
             value = _search_cast_datetime(value)
 
@@ -474,10 +479,10 @@ module Search
             else
               where(node.eq(value))
             end
-          end
+          }
 
     scope :_search_string_eq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
 
@@ -490,10 +495,10 @@ module Search
             else
               where(node.eq(value))
             end
-          end
+          }
 
     scope :_search_boolean_eq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :boolean)
             value = _search_cast_boolean(value)
 
@@ -506,118 +511,118 @@ module Search
             else
               where(node.eq(value))
             end
-          end
+          }
 
     scope :_search_integer_lt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :bigint)
             value = _search_cast_integer(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lt(value))
-          end
+          }
 
     scope :_search_datetime_lt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :timestamp)
             value = _search_cast_datetime(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lt(value))
-          end
+          }
 
     scope :_search_string_lt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lt(value))
-          end
+          }
 
     scope :_search_integer_lteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :bigint)
             value = _search_cast_integer(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lteq(value))
-          end
+          }
 
     scope :_search_datetime_lteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :timestamp)
             value = _search_cast_datetime(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lteq(value))
-          end
+          }
 
     scope :_search_string_lteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
             value = value.first if value.is_a?(Range)
 
             where(node.lteq(value))
-          end
+          }
 
     scope :_search_integer_gt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :bigint)
             value = _search_cast_integer(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gt(value))
-          end
+          }
 
     scope :_search_datetime_gt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :timestamp)
             value = _search_cast_datetime(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gt(value))
-          end
+          }
 
     scope :_search_string_gt,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gt(value))
-          end
+          }
 
     scope :_search_integer_gteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :bigint)
             value = _search_cast_integer(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gteq(value))
-          end
+          }
 
     scope :_search_datetime_gteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :timestamp)
             value = _search_cast_datetime(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gteq(value))
-          end
+          }
 
     scope :_search_string_gteq,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
             value = value.last if value.is_a?(Range)
 
             where(node.gteq(value))
-          end
+          }
 
     scope :_search_string_matches,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
 
@@ -630,10 +635,10 @@ module Search
             else
               where(node.matches("%#{value}%", nil, false))
             end
-          end
+          }
 
     scope :_search_string_ends,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
 
@@ -646,10 +651,10 @@ module Search
             else
               where(node.matches("%#{value}", nil, false))
             end
-          end
+          }
 
     scope :_search_string_starts,
-          ->(node:, value:) do
+          lambda { |node:, value:|
             node = _search_cast(node: node, type: :text)
             value = _search_cast_string(value)
 
@@ -662,6 +667,6 @@ module Search
             else
               where(node.matches("#{value}%", nil, false))
             end
-          end
+          }
   end
 end

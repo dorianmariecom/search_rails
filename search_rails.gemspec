@@ -12,10 +12,10 @@ Gem::Specification.new do |s|
   s.homepage = "https://github.com/dorianmariecom/search_rails"
   s.license = "MIT"
 
-  s.add_dependency "rails"
-  s.add_dependency "query-ruby"
-  s.add_dependency "zeitwerk"
   s.add_dependency "chronic"
+  s.add_dependency "query-ruby"
+  s.add_dependency "rails"
+  s.add_dependency "zeitwerk"
 
   s.metadata["rubygems_mfa_required"] = "true"
 
