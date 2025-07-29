@@ -28,7 +28,7 @@ module Search
     end
 
     def _search_cast(node:, type: "text")
-      Arel::Nodes::NamedFunction.new("cast", [node.as(type)])
+      Arel::Nodes::NamedFunction.new("cast", [node.as(type.to_s)])
     end
 
     def _search_cast_boolean(value)
