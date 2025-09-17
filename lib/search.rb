@@ -120,7 +120,9 @@ module Search
             fields = fields.map(&:to_s)
 
             relations =
-              fields.filter_map { |field| search_fields.fetch(field.to_sym)[:relation] }
+              fields.filter_map do |field|
+                search_fields.fetch(field.to_sym)[:relation]
+              end
 
             relations.reduce(scope) do |scope_with_relations, relation|
               relation.call(scope_with_relations)
@@ -186,7 +188,11 @@ module Search
                 if key.blank?
                   scope.none
                 else
-                  scope._search_field(key: key, operator: operator, value: value)
+                  scope._search_field(
+                    key: key,
+                    operator: operator,
+                    value: value
+                  )
                 end
               else
                 raise ArgumentError
