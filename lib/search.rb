@@ -261,9 +261,7 @@ module Search
               _search_matches(field: field, value: value)
             when "="
               _search_equal(field: field, value: value)
-            when "!:"
-              where.not(id: _search_colon(field: field, value: value))
-            when "!!"
+            when "!:", "!!"
               where.not(id: _search_colon(field: field, value: value))
             when "!^"
               where.not(id: _search_starts(field: field, value: value))
