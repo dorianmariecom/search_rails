@@ -13,7 +13,7 @@ Gem::Specification.new do |s|
   s.license = "MIT"
 
   s.add_dependency "chronic"
-  s.add_dependency "query-ruby"
+  s.add_dependency "query-ruby", ">= 2.0.1", "< 3"
   s.add_dependency "rails"
   s.add_dependency "zeitwerk"
 

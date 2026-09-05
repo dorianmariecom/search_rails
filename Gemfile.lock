@@ -3,7 +3,7 @@ PATH
   specs:
     search_rails (3.0.1)
       chronic
-      query-ruby
+      query-ruby (>= 2.0.1, < 3)
       rails
       zeitwerk
 
@@ -104,12 +104,12 @@ GEM
     csv (3.3.6)
     date (3.5.1)
     diff-lcs (1.6.2)
-    dorian (3.0.1)
+    dorian (3.0.2)
       csv (>= 3.3.6, < 4)
-      dorian-arguments (>= 2.0.0, < 3)
-      dorian-eval (>= 2.0.0, < 3)
-      dorian-progress (>= 2.0.0, < 3)
-      dorian-to_struct (>= 3.0.0, < 4)
+      dorian-arguments (>= 2.0.1, < 3)
+      dorian-eval (>= 2.0.1, < 3)
+      dorian-progress (>= 2.0.1, < 3)
+      dorian-to_struct (>= 3.0.1, < 4)
       haml (>= 7.5.1, < 8.0)
       hexapdf (>= 1.10.0, < 2)
       json (>= 2.21.2, < 3)
@@ -122,13 +122,13 @@ GEM
       terminal-table (>= 4.0.0, < 5)
       w_syntax_tree-erb (>= 0.12.0, < 1)
       yaml (>= 0.4.0, < 1)
-    dorian-arguments (2.0.0)
+    dorian-arguments (2.0.1)
       bigdecimal (>= 3.1, < 5)
-    dorian-eval (2.0.0)
+    dorian-eval (2.0.1)
       yaml (>= 0.3, < 1)
-    dorian-progress (2.0.0)
+    dorian-progress (2.0.1)
       ruby-progressbar (>= 1.13, < 2)
-    dorian-to_struct (3.0.0)
+    dorian-to_struct (3.0.1)
     drb (2.2.3)
     erb (6.0.7)
     erubi (1.13.1)
@@ -155,7 +155,7 @@ GEM
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
     json (2.21.2)
-    language-ruby (2.0.0)
+    language-ruby (2.0.1)
       dorian-arguments
       zeitwerk
     language_server-protocol (3.17.0.6)
@@ -206,12 +206,12 @@ GEM
     prettyprint (0.2.0)
     prism (1.9.0)
     public_suffix (7.0.5)
-    query-ruby (2.0.0)
+    query-ruby (2.0.1)
       activesupport
       bigdecimal
-      dorian-arguments
+      dorian-arguments (>= 2.0.1, < 3)
       json
-      language-ruby
+      language-ruby (>= 2.0.1, < 3)
       zeitwerk
     racc (1.8.1)
     rack (3.2.7)
