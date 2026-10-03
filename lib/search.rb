@@ -100,6 +100,7 @@ module Search
 
             fields = fields.map(&:to_s)
             q = q.to_s
+            return all if q.blank?
 
             where(
               id:
@@ -213,6 +214,7 @@ module Search
 
             fields = fields.map(&:to_s)
             q = q.to_s
+            return all if q.blank?
 
             where(
               fields
@@ -233,6 +235,8 @@ module Search
           lambda { |key:, value:, operator: ":", fields: search_fields&.keys|
             raise ArgumentError unless search_fields.is_an?(Hash)
             raise ArgumentError unless fields.is_an?(Array)
+
+            return all if value.blank?
 
             fields = fields.map(&:to_s)
             key = key.to_s.presence_in(fields)
@@ -631,7 +635,7 @@ module Search
                 where(node.gteq(value.first).and(node.lteq(value.last)))
               end
             else
-              where(node.matches("%#{value}%", nil, false))
+              value.present? ? where(node.matches("%#{value}%", nil, false)) : all
             end
           }
 
@@ -647,7 +651,7 @@ module Search
                 where(node.gteq(value.first).and(node.lteq(value.last)))
               end
             else
-              where(node.matches("%#{value}", nil, false))
+              value.present? ? where(node.matches("%#{value}", nil, false)) : all
             end
           }
 
@@ -663,7 +667,7 @@ module Search
                 where(node.gteq(value.first).and(node.lteq(value.last)))
               end
             else
-              where(node.matches("#{value}%", nil, false))
+              value.present? ? where(node.matches("#{value}%", nil, false)) : all
             end
           }
   end
